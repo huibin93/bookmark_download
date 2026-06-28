@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">公众号归档</string>
+    <string name="unsupported_link">不支持的链接类型</string>
+</resources>
