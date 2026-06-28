@@ -2,6 +2,8 @@
 
 这是根据 `ANDROID_AUTO_CRAWLER_DESIGN.md` 实现的 Android MVP。第一版只处理用户主动分享或打开的微信公众号文章链接，数据默认保存在本机 Room 数据库和 App 私有文件目录；用户可以从首页多选文章导出到 Downloads。
 
+开发记录、设计决策、验证结果和遗留问题见 [docs/IMPLEMENTATION_LOG.md](docs/IMPLEMENTATION_LOG.md)。
+
 ## 已实现
 
 - 接收系统分享 `ACTION_SEND text/plain`。
