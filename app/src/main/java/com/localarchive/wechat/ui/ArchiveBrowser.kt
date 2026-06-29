@@ -7,20 +7,28 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -107,7 +115,7 @@ fun ArchiveBrowser(
                         discoverDepthOne = true,
                     )
                 }.onSuccess { result ->
-                    status = "已保存：发现 ${result.discoveredCount}，入队 ${result.queuedCount}"
+                    status = "已保存 · 发现链接 ${result.discoveredCount} · 记录专辑 ${result.queuedCount}"
                 }.onFailure { error ->
                     status = error.message ?: "保存失败"
                 }
@@ -117,46 +125,57 @@ fun ArchiveBrowser(
     }
 
     Column(Modifier.fillMaxSize().safeDrawingPadding()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            CompactTextButton(onClick = { webView?.goBack() }, enabled = canGoBack) { Text("<") }
-            CompactTextButton(onClick = { webView?.goForward() }, enabled = canGoForward) { Text(">") }
-            CompactTextButton(
-                onClick = {
-                    if (offlineMode) {
-                        offlineMode = false
-                        loading = true
-                        status = "打开在线页面"
-                    } else {
-                        loading = true
-                        status = "刷新在线页面"
-                        webView?.reload()
-                    }
-                },
-            ) { Text("刷新") }
-            Button(
-                onClick = {
-                    val view = webView ?: return@Button
-                    applyDesktopViewport(view) {
-                        saveCurrentPage(view, "正在覆盖保存")
-                    }
-                },
-                enabled = !offlineMode && !saving && !loading,
-                modifier = Modifier.defaultMinSize(minWidth = 64.dp, minHeight = 40.dp),
-                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
+        Surface(tonalElevation = 2.dp, color = MaterialTheme.colorScheme.surface) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(if (saving) "保存中" else "保存")
+                IconButton(onClick = { webView?.goBack() }, enabled = canGoBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "后退")
+                }
+                IconButton(onClick = { webView?.goForward() }, enabled = canGoForward) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "前进")
+                }
+                IconButton(
+                    onClick = {
+                        if (offlineMode) {
+                            offlineMode = false
+                            loading = true
+                            status = "打开在线页面"
+                        } else {
+                            loading = true
+                            status = "刷新在线页面"
+                            webView?.reload()
+                        }
+                    },
+                ) {
+                    Icon(Icons.Filled.Refresh, contentDescription = "刷新")
+                }
+                Spacer(Modifier.weight(1f))
+                IconButton(
+                    onClick = {
+                        clipboard.setText(AnnotatedString(currentUrl))
+                        status = "已复制链接"
+                    },
+                ) {
+                    Icon(Icons.Filled.ContentCopy, contentDescription = "复制链接")
+                }
+                FilledIconButton(
+                    onClick = {
+                        val view = webView ?: return@FilledIconButton
+                        applyDesktopViewport(view) {
+                            saveCurrentPage(view, "正在覆盖保存")
+                        }
+                    },
+                    enabled = !offlineMode && !saving && !loading,
+                ) {
+                    Icon(Icons.Filled.Download, contentDescription = if (saving) "保存中" else "保存")
+                }
+                IconButton(onClick = onClose) {
+                    Icon(Icons.Filled.Close, contentDescription = "关闭")
+                }
             }
-            CompactTextButton(
-                onClick = {
-                    clipboard.setText(AnnotatedString(if (offlineMode) currentUrl else currentUrl))
-                    status = "已复制链接"
-                },
-            ) { Text("复制") }
-            CompactTextButton(onClick = onClose) { Text("关闭") }
         }
         if (loading) {
             LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -271,22 +290,6 @@ private fun applyBrowserSettings(view: WebView, offlineMode: Boolean) {
 private fun applyDesktopViewport(view: WebView, onApplied: () -> Unit = {}) {
     view.evaluateJavascript(DESKTOP_VIEWPORT_SCRIPT) {
         onApplied()
-    }
-}
-
-@Composable
-private fun CompactTextButton(
-    onClick: () -> Unit,
-    enabled: Boolean = true,
-    content: @Composable () -> Unit,
-) {
-    TextButton(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = Modifier.defaultMinSize(minWidth = 44.dp, minHeight = 40.dp),
-        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-    ) {
-        content()
     }
 }
 

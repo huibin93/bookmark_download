@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- bookmark outline with a knocked-out download arrow, single tintable layer -->
+    <path
+        android:fillColor="#000000"
+        android:fillType="evenOdd"
+        android:pathData="M46,30 L64,30 Q70,30 70,36 L70,83 L56,71 L42,83 L42,36 Q42,30 46,30 Z M53,39 L53,50 L49,50 L56,60 L63,50 L59,50 L59,39 Z" />
+</vector>

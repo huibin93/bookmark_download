@@ -44,6 +44,11 @@ object WechatHtmlParser {
         """<a\b[^>]*href\s*=\s*(["'])(.*?)\1[^>]*>(.*?)</a>""",
         setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
     )
+    // 微信专辑目录的文章项不是 <a href>，而是 <li data-link="...">；链接里还带 &amp; 实体。
+    private val dataLinkPattern = Regex(
+        """\bdata-(?:link|url|src-link)\s*=\s*(["'])(.*?)\1""",
+        RegexOption.IGNORE_CASE,
+    )
     private val imagePattern = Regex("""<img\b[^>]*>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
     private val imageAttrPattern = Regex("""\b(?:data-src|data-original|src)\s*=\s*(["'])(.*?)\1""", RegexOption.IGNORE_CASE)
     private val scriptStylePattern = Regex("""<(script|style)\b[^>]*>.*?</\1>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
@@ -94,21 +99,36 @@ object WechatHtmlParser {
 
     private fun extractSupportedLinks(baseUrl: String, html: String): List<ParsedDiscoveredLink> {
         val seen = linkedSetOf<String>()
-        val links = anchorPattern.findAll(html)
-            .mapNotNullTo(mutableListOf()) { match ->
-                val href = match.groupValues.getOrNull(2).orEmpty()
-                val resolved = WechatUrlNormalizer.resolveAgainstBase(baseUrl, href) ?: return@mapNotNullTo null
-                val normalized = WechatUrlNormalizer.normalize(resolved) ?: return@mapNotNullTo null
-                if (normalized.type != LinkType.ARTICLE && normalized.type != LinkType.ALBUM) return@mapNotNullTo null
-                if (!seen.add(normalized.normalizedUrl)) return@mapNotNullTo null
+        val links = mutableListOf<ParsedDiscoveredLink>()
+
+        fun consider(rawHref: String, anchorText: String) {
+            val cleaned = rawHref.decodeEntities().trim()
+            if (cleaned.isBlank()) return
+            val resolved = WechatUrlNormalizer.resolveAgainstBase(baseUrl, cleaned) ?: return
+            val normalized = WechatUrlNormalizer.normalize(resolved) ?: return
+            if (normalized.type != LinkType.ARTICLE && normalized.type != LinkType.ALBUM) return
+            if (!seen.add(normalized.normalizedUrl)) return
+            links.add(
                 ParsedDiscoveredLink(
                     originalUrl = normalized.originalUrl,
                     normalizedUrl = normalized.normalizedUrl,
                     linkType = normalized.type,
-                    anchorText = match.groupValues.getOrNull(3).orEmpty().cleanText(),
-                )
-            }
-        WechatUrlNormalizer.extractUrls(html).forEach { normalized ->
+                    anchorText = anchorText,
+                ),
+            )
+        }
+
+        // <a href> 文章/专辑链接
+        anchorPattern.findAll(html).forEach { match ->
+            consider(match.groupValues.getOrNull(2).orEmpty(), match.groupValues.getOrNull(3).orEmpty().cleanText())
+        }
+        // 专辑目录项 <li data-link="..."> —— 专辑展开记录的关键来源
+        dataLinkPattern.findAll(html).forEach { match ->
+            consider(match.groupValues.getOrNull(2).orEmpty(), "")
+        }
+        // 整页兜底扫描：先把 &amp; 还原成 &，否则 URL 会在 &amp; 的分号处被截断，
+        // 导致一个专辑里所有文章都塌缩成同一个只剩 __biz 的链接。
+        WechatUrlNormalizer.extractUrls(html.replace("&amp;", "&")).forEach { normalized ->
             if (normalized.type != LinkType.ARTICLE && normalized.type != LinkType.ALBUM) return@forEach
             if (!seen.add(normalized.normalizedUrl)) return@forEach
             links.add(

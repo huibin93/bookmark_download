@@ -134,7 +134,9 @@ class ArchiveRepository(
             currentUrl = currentUrl,
             rawHtml = rawHtml,
             fallbackTitle = fallbackTitle,
-            discoverDepthOne = discoverDepthOne && link.depth == 0,
+            // 深度 0 的文章会发现并登记专辑；打开专辑页（无论它是直接打开还是从文章里发现的
+            // 深度 1）都展开记录其文章目录。深度 1 的文章不再继续发现，避免无限扩散。
+            discoverDepthOne = discoverDepthOne && (link.depth == 0 || link.linkType == LinkType.ALBUM),
         )
     }
 
@@ -266,14 +268,19 @@ class ArchiveRepository(
                         createdAt = System.currentTimeMillis(),
                     ),
                 )
-                if (link.linkType != LinkType.ALBUM) {
-                    val discoveredLink = captureNormalizedUrl(
+                // 把"分享/打开的文章"里发现的【专辑】登记成一条专辑记录（出现在"专辑"筛选里），
+                // 但【不后台抓取】：微信对非浏览器请求会弹验证墙，裸 HTTP 抓专辑只会得到
+                // "验证/未命名"垃圾页。专辑的展开放到用户在 App 内打开它时由 WebView 完成
+                // （带 Cookie/JS，可靠），那时只记录专辑目录、不抓取其中文章。
+                // 普通文章链接只记进 discovered_links 台账，不抓取。
+                if (link.linkType != LinkType.ALBUM && discovered.linkType == LinkType.ALBUM) {
+                    captureNormalizedUrl(
                         NormalizedWechatUrl(discovered.originalUrl, discovered.normalizedUrl, discovered.linkType),
                         LinkSource.DISCOVERED,
                         depth = 1,
                         parentLinkId = link.id,
                     )
-                    if (enqueueSaveTask(discoveredLink, priority = 80)) queued += 1
+                    queued += 1
                 }
             }
         }
