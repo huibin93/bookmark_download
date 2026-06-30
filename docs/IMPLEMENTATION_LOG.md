@@ -204,3 +204,32 @@ adb install -r app\build\outputs\apk\debug\app-debug.apk
 - 远端：`ssh://git@ssh.github.com:443/huibin93/bookmark_download.git`
 
 当前环境里 GitHub SSH 22 端口不可用，所以远端使用 GitHub SSH 443 端口。
+
+## 追加记录
+
+日期：2026-06-29
+
+### 界面重构（Material 3 / Material You）
+
+只改表现层与图标，不动归档/抓取/数据逻辑：
+
+- `ArchiveTheme`：补齐明/暗双色板，并在 API 31+ 启用动态取色（Material You）；新增自定义 Typography 与圆角 Shapes。
+- 窗口主题改为 DayNight（`values/` + `values-night/`），状态栏/导航栏透明，两个 Activity 启用 `enableEdgeToEdge()`。
+- 启动图标：旧的 48dp 方块矢量 → 自适应图标（前景"书签+下载箭头" + 渐变背景 + `monochrome` 主题层），manifest 指向 `@mipmap/ic_launcher`。
+- 首页：文字"菜单"按钮 → 图标工具栏（`CenterAlignedTopAppBar`）；新增可横滑筛选 Chips、文章/队列统计胶囊、类型头像、按状态着色的状态徽章（已下载/队列中/失败/需手动/未下载）、选择模式底栏、空状态。
+- 浏览页：`< > 刷新 保存 复制 关闭` 文字按钮 → Material 图标工具栏（保存为高亮的 `FilledIconButton`）。
+- 依赖新增 `androidx.compose.material:material-icons-extended`（debug 包因此从 ~31MB 增到 ~73MB；release 经 R8 收缩后会回落）。
+
+### 验证记录（真机 5d510bb4 / 小米 M2101K9C / Android 13 API33 / MIUI14）
+
+- `:app:assembleDebug` 与 `:app:testDebugUnitTest` 均通过（URL 规范化 3 个用例全绿）。
+- MIUI 默认拦截 `adb install`（`INSTALL_FAILED_USER_RESTRICTED`），在设备上点"允许"后 `adb install -r` 成功。
+- 首页在浅色/深色下均正确渲染，动态取色生效；统计胶囊单行不再换行。
+- 通过 VIEW intent 打开内置浏览器：自动保存流程触发，状态显示"已保存：发现 0，入队 0"，并在
+  `files/archive/...` 与 `Downloads/WechatArchive/articles/<id>/` 写出
+  `raw.html / readable.html / text.txt / metadata.json / links.json`，证明"自动拉取并保存网页到本地"在真机可用（测试用的是无效 token，正文为微信"参数错误"页；真实文章会保存真实正文与图片）。验证后已 `pm clear` 复位、清理测试导出目录。
+
+### 运行环境
+
+本机实测的工具链路径、真机连接、构建/安装命令，以及与根目录 Python 参考实现
+（`wechat_archiver/`）的运行逻辑对应，见 [RUN_ENVIRONMENT.md](RUN_ENVIRONMENT.md)。

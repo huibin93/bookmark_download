@@ -5,11 +5,17 @@ import com.localarchive.wechat.core.parser.ParsedArticle
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 
 class ArchiveFileStore(context: Context) {
     private val root = File(context.filesDir, "archive/articles")
 
-    fun saveArticle(linkId: Long, normalizedUrl: String, rawHtml: String, parsed: ParsedArticle): String {
+    suspend fun saveArticle(linkId: Long, normalizedUrl: String, rawHtml: String, parsed: ParsedArticle): String {
         val dir = File(root, linkId.toString())
         if (!dir.exists()) dir.mkdirs()
         val assetsDir = File(dir, "assets").apply { mkdirs() }
@@ -36,18 +42,27 @@ class ArchiveFileStore(context: Context) {
         return dir.absolutePath
     }
 
-    private fun downloadImages(imageUrls: List<String>, referer: String, assetsDir: File): Map<String, String> {
-        if (imageUrls.isEmpty()) return emptyMap()
-        return imageUrls.mapIndexedNotNull { index, url ->
-            runCatching {
-                val bytesAndType = downloadImage(url, referer)
-                val extension = extensionFor(url, bytesAndType.contentType)
-                val fileName = "image_${(index + 1).toString().padStart(3, '0')}.$extension"
-                val file = File(assetsDir, fileName)
-                file.writeBytes(bytesAndType.bytes)
-                url to "assets/$fileName"
-            }.getOrNull()
-        }.toMap()
+    // 图片并发下载（限制并发数），避免几十张图顺序下载导致“正在写入本机存档”长时间卡住。
+    private suspend fun downloadImages(
+        imageUrls: List<String>,
+        referer: String,
+        assetsDir: File,
+    ): Map<String, String> = coroutineScope {
+        if (imageUrls.isEmpty()) return@coroutineScope emptyMap()
+        val gate = Semaphore(MAX_IMAGE_CONCURRENCY)
+        imageUrls.mapIndexed { index, url ->
+            async(Dispatchers.IO) {
+                gate.withPermit {
+                    runCatching {
+                        val bytesAndType = downloadImage(url, referer)
+                        val extension = extensionFor(url, bytesAndType.contentType)
+                        val fileName = "image_${(index + 1).toString().padStart(3, '0')}.$extension"
+                        File(assetsDir, fileName).writeBytes(bytesAndType.bytes)
+                        url to "assets/$fileName"
+                    }.getOrNull()
+                }
+            }
+        }.awaitAll().filterNotNull().toMap()
     }
 
     private fun downloadImage(rawUrl: String, referer: String): DownloadedImage {
@@ -156,8 +171,10 @@ class ArchiveFileStore(context: Context) {
     )
 
     companion object {
+        private const val MAX_IMAGE_CONCURRENCY = 6
+        // 与内置浏览器保持一致的常规移动 Chrome UA（图片走 Referer 校验，UA 仅用于不显眼）。
         private const val DESKTOP_USER_AGENT =
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+            "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
         private val imgTagPattern = Regex("""<img\b[^>]*>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
         private val attrWithRemoteImagePattern = Regex("""\b(src|data-src|data-original)\s*=\s*(["'])[^"']*\2""", RegexOption.IGNORE_CASE)
         private val srcAttrPattern = Regex("""\bsrc\s*=""", RegexOption.IGNORE_CASE)

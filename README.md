@@ -38,18 +38,20 @@
 - Android Studio 或 Android SDK，当前工程使用 `compileSdk 36`、`minSdk 29`。
 - JDK 21。当前机器可使用 Android Studio 自带 JBR：`C:\Program Files\Android\Android Studio\jbr`。
 
-命令行构建：
+> 本机实测的完整运行环境（工具链路径、真机连接、构建/安装命令、以及与
+> 根目录 Python 参考实现的运行逻辑对应）见 [docs/RUN_ENVIRONMENT.md](docs/RUN_ENVIRONMENT.md)。
+
+命令行构建（在项目根目录，即本文件所在目录）：
 
 ```powershell
-cd D:\01\favorites\wechat-archive-android
 $env:JAVA_HOME='C:\Program Files\Android\Android Studio\jbr'
 .\gradlew.bat :app:assembleDebug
 ```
 
-如果 `local.properties` 不存在，创建并指向 Android SDK：
+如果 `local.properties` 不存在，创建并指向本机 Android SDK：
 
 ```properties
-sdk.dir=C\:\\Users\\acang\\AppData\\Local\\Android\\Sdk
+sdk.dir=C\:\\Users\\260164\\AppData\\Local\\Android\\Sdk
 ```
 
 生成的 APK：

@@ -15,6 +15,8 @@ data class ParsedArticle(
     val contentHash: String,
     val discoveredLinks: List<ParsedDiscoveredLink>,
     val imageUrls: List<String>,
+    // 专辑规范化地址 -> 专辑名称（从文章里的 textvalue 提取，用于“只记名称+地址”）。
+    val albumNames: Map<String, String> = emptyMap(),
 )
 
 data class ParsedDiscoveredLink(
@@ -49,6 +51,12 @@ object WechatHtmlParser {
     private val scriptStylePattern = Regex("""<(script|style)\b[^>]*>.*?</\1>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
     private val tagPattern = Regex("""<[^>]+>""")
     private val whitespacePattern = Regex("""[ \t\r\n]+""")
+    // 微信文章里专辑以 href="...appmsgalbum..." textvalue="<<<专辑名>>>" 形式承载（JS 转义）。
+    private val jsHexEscapePattern = Regex("""\\x([0-9a-fA-F]{2})""")
+    private val albumNamePattern = Regex(
+        """href="([^"]*appmsgalbum[^"]*)"[^>]{0,80}?textvalue="([^"]{1,120})"""",
+        RegexOption.IGNORE_CASE,
+    )
 
     fun parse(baseUrl: String, html: String, fallbackTitle: String?): ParsedArticle {
         val title = firstMatch(html, titlePatterns)
@@ -74,7 +82,25 @@ object WechatHtmlParser {
             contentHash = sha256(text.ifBlank { html }),
             discoveredLinks = discovered,
             imageUrls = imageUrls,
+            albumNames = extractAlbumNames(html),
         )
+    }
+
+    private fun extractAlbumNames(html: String): Map<String, String> {
+        // 绝大多数文章没有合集/专辑，先做一次廉价判断，避免对整页做昂贵的转义还原。
+        if (!html.contains("appmsgalbum")) return emptyMap()
+        // 文章正文是 JS 转义的（\x22="、\x26lt;=&lt; 等），先还原 \xNN 再按 href/textvalue 配对。
+        val decoded = jsHexEscapePattern.replace(html) { match ->
+            match.groupValues[1].toInt(16).toChar().toString()
+        }
+        val map = linkedMapOf<String, String>()
+        albumNamePattern.findAll(decoded).forEach { match ->
+            val normalized = WechatUrlNormalizer.normalize(match.groupValues[1]) ?: return@forEach
+            if (normalized.type != LinkType.ALBUM) return@forEach
+            val name = match.groupValues[2].decodeEntities().trim().trim('<', '>', '#', ' ').trim()
+            if (name.isNotBlank()) map.putIfAbsent(normalized.normalizedUrl, name)
+        }
+        return map
     }
 
     fun htmlToText(html: String): String =

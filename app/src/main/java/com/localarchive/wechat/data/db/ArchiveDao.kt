@@ -30,6 +30,12 @@ interface ArchiveDao {
     @Query("UPDATE link_records SET last_seen_at = :time, status = :status WHERE id = :id")
     suspend fun updateLinkStatus(id: Long, status: LinkStatus, time: Long)
 
+    @Query("DELETE FROM link_records WHERE id IN (:linkIds)")
+    suspend fun deleteLinksByIds(linkIds: List<Long>)
+
+    @Query("DELETE FROM discovered_links WHERE source_article_id IN (:articleIds)")
+    suspend fun deleteDiscoveredLinksByArticleIds(articleIds: List<Long>)
+
     @Query(
         """
         SELECT * FROM articles

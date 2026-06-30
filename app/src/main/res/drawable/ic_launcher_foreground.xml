@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- soft shadow under the bookmark -->
+    <path
+        android:fillColor="#000000"
+        android:fillAlpha="0.12"
+        android:pathData="M47,33 L70,33 Q76,33 76,39 L76,85 L62,73 L48,85 L48,39 Q48,33 47,33 Z" />
+    <!-- bookmark body (white) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M46,30 L64,30 Q70,30 70,36 L70,83 L56,71 L42,83 L42,36 Q42,30 46,30 Z" />
+    <!-- download arrow (teal) inside the bookmark -->
+    <path
+        android:fillColor="#0F766E"
+        android:pathData="M53,39 L59,39 L59,50 L63,50 L56,60 L49,50 L53,50 Z" />
+</vector>
