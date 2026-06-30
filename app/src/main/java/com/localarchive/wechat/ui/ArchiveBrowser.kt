@@ -114,9 +114,17 @@ fun ArchiveBrowser(
                 status = nextStatus
                 view.evaluateJavascript(OUTER_HTML_SCRIPT) { encoded ->
                     scope.launch {
+                        // 解码这串很大的 outerHTML（JSON 反转义）也很重，放后台线程，别卡主线程。
+                        val html = withContext(Dispatchers.Default) { decodeJavascriptString(encoded) }
+                        if (looksLikeVerificationWall(html)) {
+                            // 抓到的是验证墙而不是文章：不保存（不产生“未命名”垃圾），并允许等它
+                            // 自动跳转到真文章后再保存一次。
+                            status = "⚠ 命中验证墙，未保存。等待自动跳转或在页面内完成验证。"
+                            autoSaved = false
+                            saving = false
+                            return@launch
+                        }
                         runCatching {
-                            // 解码这串很大的 outerHTML（JSON 反转义）也很重，放后台线程，别卡主线程。
-                            val html = withContext(Dispatchers.Default) { decodeJavascriptString(encoded) }
                             repository.saveCurrentPage(
                                 linkId = linkId,
                                 currentUrl = currentUrl,
@@ -305,6 +313,16 @@ private fun normalBrowserUserAgent(context: android.content.Context): String =
 private fun decodeJavascriptString(encoded: String?): String {
     if (encoded.isNullOrBlank() || encoded == "null") return ""
     return runCatching { JSONArray("[$encoded]").optString(0) }.getOrDefault("")
+}
+
+// 正文正向校验：有 js_content 正文容器即真文章；否则若含验证/风控标记，判为验证墙。
+private fun looksLikeVerificationWall(html: String): Boolean {
+    if (html.contains("js_content")) return false
+    return html.contains("环境异常") ||
+        html.contains("完成验证") ||
+        html.contains("wappoc_appmsgcaptcha") ||
+        html.contains("appmsg_captcha") ||
+        html.contains("操作过于频繁")
 }
 
 private const val FALLBACK_MOBILE_USER_AGENT =
