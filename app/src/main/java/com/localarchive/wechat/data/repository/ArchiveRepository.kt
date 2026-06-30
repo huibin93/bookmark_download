@@ -65,34 +65,31 @@ class ArchiveRepository(
         return articles.size
     }
 
+    /** 批量导出专辑链接为 JSON（仅名称 + 地址），返回写入的相对路径。 */
+    suspend fun exportAlbums(albums: List<LinkRecordEntity>): String =
+        withContext(Dispatchers.IO) {
+            downloadsExporter.exportAlbumsJson(
+                albums.filter { it.linkType == LinkType.ALBUM }
+                    .map { (it.title.orEmpty()) to it.normalizedUrl },
+            )
+        }
+
     suspend fun deleteArticlesForLinks(linkIds: Set<Long>): Int {
         if (linkIds.isEmpty()) return 0
-        val articles = dao.getArticlesByLinkIds(linkIds.toList())
+        val ids = linkIds.toList()
+        val articles = dao.getArticlesByLinkIds(ids)
+        // 删除本机归档文件
         articles.forEach { article ->
             runCatching { File(article.archiveDir).deleteRecursively() }
-            dao.updateLinkStatus(article.linkId, LinkStatus.CAPTURED, System.currentTimeMillis())
         }
-        dao.deleteTasksByLinkIds(linkIds.toList())
-        dao.deleteArticlesByLinkIds(linkIds.toList())
-        return articles.size
-    }
-
-    suspend fun enqueueDiscoveredArticlesForAlbum(linkId: Long): Int {
-        val album = dao.findArticleByLinkId(linkId) ?: return 0
-        val sourceLink = dao.getLink(linkId) ?: return 0
-        val discovered = dao.getDiscoveredLinks(album.id)
-        var queued = 0
-        discovered.forEach { item ->
-            if (item.linkType != LinkType.ARTICLE) return@forEach
-            val discoveredLink = captureNormalizedUrl(
-                NormalizedWechatUrl(item.discoveredUrl, item.normalizedUrl, item.linkType),
-                LinkSource.DISCOVERED,
-                depth = 1,
-                parentLinkId = sourceLink.id,
-            )
-            if (enqueueSaveTask(discoveredLink, priority = 70)) queued += 1
-        }
-        return queued
+        // 连同这些文章发现的链接台账一起清掉
+        val articleIds = articles.map { it.id }
+        if (articleIds.isNotEmpty()) dao.deleteDiscoveredLinksByArticleIds(articleIds)
+        dao.deleteTasksByLinkIds(ids)
+        dao.deleteArticlesByLinkIds(ids)
+        // 彻底删除链接记录本身，不再保留“见过”的去重记录。
+        dao.deleteLinksByIds(ids)
+        return ids.size
     }
 
     suspend fun captureIncomingText(
@@ -134,9 +131,9 @@ class ArchiveRepository(
             currentUrl = currentUrl,
             rawHtml = rawHtml,
             fallbackTitle = fallbackTitle,
-            // 深度 0 的文章会发现并登记专辑；打开专辑页（无论它是直接打开还是从文章里发现的
-            // 深度 1）都展开记录其文章目录。深度 1 的文章不再继续发现，避免无限扩散。
-            discoverDepthOne = discoverDepthOne && (link.depth == 0 || link.linkType == LinkType.ALBUM),
+            // 只有深度 0 的【文章】才发现并登记它引用的专辑。专辑本身只保存名称+地址，
+            // 不扫描里面有哪些文章；深度 1 的文章也不再继续发现，避免扩散。
+            discoverDepthOne = discoverDepthOne && link.depth == 0 && link.linkType != LinkType.ALBUM,
         )
     }
 
@@ -152,7 +149,8 @@ class ArchiveRepository(
             currentUrl = fetchedUrl,
             rawHtml = rawHtml,
             fallbackTitle = fallbackTitle,
-            discoverDepthOne = link.linkType == LinkType.ALBUM,
+            // 专辑只记录名称+地址，不扫描其文章目录。
+            discoverDepthOne = false,
         )
     }
 
@@ -229,7 +227,10 @@ class ArchiveRepository(
         fallbackTitle: String?,
         discoverDepthOne: Boolean,
     ): SavePageResult {
-        val parsed = WechatHtmlParser.parse(currentUrl, rawHtml, fallbackTitle)
+        // 解析（大量正则、整页扫描）放到后台线程，避免阻塞主线程导致界面卡顿/无响应。
+        val parsed = withContext(Dispatchers.Default) {
+            WechatHtmlParser.parse(currentUrl, rawHtml, fallbackTitle)
+        }
         val archiveDir = withContext(Dispatchers.IO) {
             fileStore.saveArticle(link.id, link.normalizedUrl, rawHtml, parsed)
         }
@@ -273,12 +274,17 @@ class ArchiveRepository(
                 // "验证/未命名"垃圾页。专辑的展开放到用户在 App 内打开它时由 WebView 完成
                 // （带 Cookie/JS，可靠），那时只记录专辑目录、不抓取其中文章。
                 // 普通文章链接只记进 discovered_links 台账，不抓取。
-                if (link.linkType != LinkType.ALBUM && discovered.linkType == LinkType.ALBUM) {
+                // 只登记带 album_id 的真实专辑；上一篇/下一篇等不完整的 appmsgalbum 导航链接跳过。
+                if (link.linkType != LinkType.ALBUM &&
+                    discovered.linkType == LinkType.ALBUM &&
+                    discovered.normalizedUrl.contains("album_id=")
+                ) {
                     captureNormalizedUrl(
                         NormalizedWechatUrl(discovered.originalUrl, discovered.normalizedUrl, discovered.linkType),
                         LinkSource.DISCOVERED,
                         depth = 1,
                         parentLinkId = link.id,
+                        title = parsed.albumNames[discovered.normalizedUrl] ?: discovered.anchorText.ifBlank { null },
                     )
                     queued += 1
                 }
@@ -299,6 +305,7 @@ class ArchiveRepository(
         source: LinkSource,
         depth: Int,
         parentLinkId: Long?,
+        title: String? = null,
     ): LinkRecordEntity {
         val now = System.currentTimeMillis()
         val existing = dao.findLinkByNormalizedUrl(normalized.normalizedUrl)
@@ -316,6 +323,7 @@ class ArchiveRepository(
                 parentLinkId = existing.parentLinkId ?: parentLinkId,
                 lastSeenAt = now,
                 status = status,
+                title = existing.title ?: title,
             )
             dao.updateLink(updated)
             return updated
@@ -330,6 +338,7 @@ class ArchiveRepository(
             firstSeenAt = now,
             lastSeenAt = now,
             status = LinkStatus.CAPTURED,
+            title = title,
         )
         val id = dao.insertLink(record)
         return record.copy(id = id)

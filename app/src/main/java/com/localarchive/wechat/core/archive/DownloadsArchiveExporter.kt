@@ -53,6 +53,20 @@ class DownloadsArchiveExporter(private val context: Context) {
         return "${Environment.DIRECTORY_DOWNLOADS}/$ROOT_FOLDER/articles/$dirName"
     }
 
+    /** 批量导出专辑（名称 + 地址）到 Downloads/WechatArchive/albums.json，返回相对路径。 */
+    fun exportAlbumsJson(albums: List<Pair<String, String>>): String {
+        val json = if (albums.isEmpty()) {
+            "[]"
+        } else {
+            albums.joinToString(prefix = "[\n", postfix = "\n]", separator = ",\n") { (name, url) ->
+                """  {"name": ${name.jsonString()}, "url": ${url.jsonString()}}"""
+            }
+        }
+        val relativeDir = "${Environment.DIRECTORY_DOWNLOADS}/$ROOT_FOLDER/"
+        writeText(relativeDir, "albums.json", "application/json", json)
+        return "$ROOT_FOLDER/albums.json"
+    }
+
     private fun writeText(relativeDir: String, fileName: String, mimeType: String, text: String) {
         writeBytes(relativeDir, fileName, mimeType, text.toByteArray())
     }

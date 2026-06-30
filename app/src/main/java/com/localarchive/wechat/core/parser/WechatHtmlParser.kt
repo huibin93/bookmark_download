@@ -15,6 +15,8 @@ data class ParsedArticle(
     val contentHash: String,
     val discoveredLinks: List<ParsedDiscoveredLink>,
     val imageUrls: List<String>,
+    // 专辑规范化地址 -> 专辑名称（从文章里的 textvalue 提取，用于“只记名称+地址”）。
+    val albumNames: Map<String, String> = emptyMap(),
 )
 
 data class ParsedDiscoveredLink(
@@ -44,16 +46,17 @@ object WechatHtmlParser {
         """<a\b[^>]*href\s*=\s*(["'])(.*?)\1[^>]*>(.*?)</a>""",
         setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
     )
-    // 微信专辑目录的文章项不是 <a href>，而是 <li data-link="...">；链接里还带 &amp; 实体。
-    private val dataLinkPattern = Regex(
-        """\bdata-(?:link|url|src-link)\s*=\s*(["'])(.*?)\1""",
-        RegexOption.IGNORE_CASE,
-    )
     private val imagePattern = Regex("""<img\b[^>]*>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
     private val imageAttrPattern = Regex("""\b(?:data-src|data-original|src)\s*=\s*(["'])(.*?)\1""", RegexOption.IGNORE_CASE)
     private val scriptStylePattern = Regex("""<(script|style)\b[^>]*>.*?</\1>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
     private val tagPattern = Regex("""<[^>]+>""")
     private val whitespacePattern = Regex("""[ \t\r\n]+""")
+    // 微信文章里专辑以 href="...appmsgalbum..." textvalue="<<<专辑名>>>" 形式承载（JS 转义）。
+    private val jsHexEscapePattern = Regex("""\\x([0-9a-fA-F]{2})""")
+    private val albumNamePattern = Regex(
+        """href="([^"]*appmsgalbum[^"]*)"[^>]{0,80}?textvalue="([^"]{1,120})"""",
+        RegexOption.IGNORE_CASE,
+    )
 
     fun parse(baseUrl: String, html: String, fallbackTitle: String?): ParsedArticle {
         val title = firstMatch(html, titlePatterns)
@@ -79,7 +82,25 @@ object WechatHtmlParser {
             contentHash = sha256(text.ifBlank { html }),
             discoveredLinks = discovered,
             imageUrls = imageUrls,
+            albumNames = extractAlbumNames(html),
         )
+    }
+
+    private fun extractAlbumNames(html: String): Map<String, String> {
+        // 绝大多数文章没有合集/专辑，先做一次廉价判断，避免对整页做昂贵的转义还原。
+        if (!html.contains("appmsgalbum")) return emptyMap()
+        // 文章正文是 JS 转义的（\x22="、\x26lt;=&lt; 等），先还原 \xNN 再按 href/textvalue 配对。
+        val decoded = jsHexEscapePattern.replace(html) { match ->
+            match.groupValues[1].toInt(16).toChar().toString()
+        }
+        val map = linkedMapOf<String, String>()
+        albumNamePattern.findAll(decoded).forEach { match ->
+            val normalized = WechatUrlNormalizer.normalize(match.groupValues[1]) ?: return@forEach
+            if (normalized.type != LinkType.ALBUM) return@forEach
+            val name = match.groupValues[2].decodeEntities().trim().trim('<', '>', '#', ' ').trim()
+            if (name.isNotBlank()) map.putIfAbsent(normalized.normalizedUrl, name)
+        }
+        return map
     }
 
     fun htmlToText(html: String): String =
@@ -99,36 +120,21 @@ object WechatHtmlParser {
 
     private fun extractSupportedLinks(baseUrl: String, html: String): List<ParsedDiscoveredLink> {
         val seen = linkedSetOf<String>()
-        val links = mutableListOf<ParsedDiscoveredLink>()
-
-        fun consider(rawHref: String, anchorText: String) {
-            val cleaned = rawHref.decodeEntities().trim()
-            if (cleaned.isBlank()) return
-            val resolved = WechatUrlNormalizer.resolveAgainstBase(baseUrl, cleaned) ?: return
-            val normalized = WechatUrlNormalizer.normalize(resolved) ?: return
-            if (normalized.type != LinkType.ARTICLE && normalized.type != LinkType.ALBUM) return
-            if (!seen.add(normalized.normalizedUrl)) return
-            links.add(
+        val links = anchorPattern.findAll(html)
+            .mapNotNullTo(mutableListOf()) { match ->
+                val href = match.groupValues.getOrNull(2).orEmpty()
+                val resolved = WechatUrlNormalizer.resolveAgainstBase(baseUrl, href) ?: return@mapNotNullTo null
+                val normalized = WechatUrlNormalizer.normalize(resolved) ?: return@mapNotNullTo null
+                if (normalized.type != LinkType.ARTICLE && normalized.type != LinkType.ALBUM) return@mapNotNullTo null
+                if (!seen.add(normalized.normalizedUrl)) return@mapNotNullTo null
                 ParsedDiscoveredLink(
                     originalUrl = normalized.originalUrl,
                     normalizedUrl = normalized.normalizedUrl,
                     linkType = normalized.type,
-                    anchorText = anchorText,
-                ),
-            )
-        }
-
-        // <a href> 文章/专辑链接
-        anchorPattern.findAll(html).forEach { match ->
-            consider(match.groupValues.getOrNull(2).orEmpty(), match.groupValues.getOrNull(3).orEmpty().cleanText())
-        }
-        // 专辑目录项 <li data-link="..."> —— 专辑展开记录的关键来源
-        dataLinkPattern.findAll(html).forEach { match ->
-            consider(match.groupValues.getOrNull(2).orEmpty(), "")
-        }
-        // 整页兜底扫描：先把 &amp; 还原成 &，否则 URL 会在 &amp; 的分号处被截断，
-        // 导致一个专辑里所有文章都塌缩成同一个只剩 __biz 的链接。
-        WechatUrlNormalizer.extractUrls(html.replace("&amp;", "&")).forEach { normalized ->
+                    anchorText = match.groupValues.getOrNull(3).orEmpty().cleanText(),
+                )
+            }
+        WechatUrlNormalizer.extractUrls(html).forEach { normalized ->
             if (normalized.type != LinkType.ARTICLE && normalized.type != LinkType.ALBUM) return@forEach
             if (!seen.add(normalized.normalizedUrl)) return@forEach
             links.add(

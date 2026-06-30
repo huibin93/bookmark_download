@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.addCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
@@ -34,6 +35,8 @@ class BrowserActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        // 系统返回键统一回到归档首页，而不是退到桌面或网页上一页。
+        onBackPressedDispatcher.addCallback(this) { goHome() }
         val repository = archiveApplication.archiveRepository
         val initialUrl = intent.getStringExtra(EXTRA_URL) ?: intent.dataString.orEmpty()
         val suppliedLinkId = intent.getLongExtra(EXTRA_LINK_ID, -1L)
@@ -65,10 +68,7 @@ class BrowserActivity : ComponentActivity() {
                 }
 
                 if (unsupported || url.isBlank()) {
-                    UnsupportedLink(onBackHome = {
-                        startActivity(MainActivity.createIntent(this))
-                        finish()
-                    })
+                    UnsupportedLink(onBackHome = { goHome() })
                 } else {
                     ArchiveBrowser(
                         repository = repository,
@@ -82,11 +82,20 @@ class BrowserActivity : ComponentActivity() {
                                 archiveDir = it,
                             )
                         },
-                        onClose = { finish() },
+                        onClose = { goHome() },
                     )
                 }
             }
         }
+    }
+
+    private fun goHome() {
+        startActivity(
+            MainActivity.createIntent(this).apply {
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            },
+        )
+        finish()
     }
 
     companion object {

@@ -1,5 +1,6 @@
 package com.localarchive.wechat.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
@@ -21,6 +22,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
@@ -96,11 +98,10 @@ private enum class DrawerFilter(val label: String) {
     All("全部"),
     Saved("已保存"),
     NotSaved("未下载"),
-    Albums("专辑"),
     Failed("失败"),
 }
 
-private enum class ItemState { Saved, Queued, Failed, NeedsManual, NotSaved }
+private enum class ItemState { Saved, Queued, Failed, NeedsManual, NotSaved, Album }
 
 private data class ArchiveListItem(
     val link: LinkRecordEntity,
@@ -115,6 +116,12 @@ fun ArchiveApp(
     onOpenRemoteLink: (LinkRecordEntity) -> Unit,
     onOpenStoredArticle: (ArticleEntity) -> Unit,
 ) {
+    // 专辑是独立页面，不与首页混在一起。
+    var showAlbums by remember { mutableStateOf(false) }
+    if (showAlbums) {
+        AlbumScreen(repository = repository, onBack = { showAlbums = false })
+        return
+    }
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val snackbarHostState = remember { SnackbarHostState() }
@@ -159,6 +166,11 @@ fun ArchiveApp(
                             Icon(Icons.Filled.Menu, contentDescription = "筛选视图")
                         }
                     },
+                    actions = {
+                        IconButton(onClick = { showAlbums = true }) {
+                            Icon(Icons.Filled.Collections, contentDescription = "专辑")
+                        }
+                    },
                     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                         containerColor = MaterialTheme.colorScheme.surface,
                         scrolledContainerColor = MaterialTheme.colorScheme.surface,
@@ -180,7 +192,7 @@ fun ArchiveApp(
                         onDelete = {
                             scope.launch {
                                 val count = repository.deleteArticlesForLinks(selectedLinkIds)
-                                snackbarHostState.showSnackbar("已删除 $count 篇，链接记录已保留")
+                                snackbarHostState.showSnackbar("已删除 $count 项")
                                 selectedLinkIds = emptySet()
                             }
                         },
@@ -249,14 +261,140 @@ fun ArchiveApp(
                                         selectedLinkIds + item.link.id
                                     }
                                 },
-                                onArchiveAlbum = {
-                                    scope.launch {
-                                        val count = repository.enqueueDiscoveredArticlesForAlbum(item.link.id)
-                                        snackbarHostState.showSnackbar("已加入 $count 篇专辑文章")
-                                    }
-                                },
                             )
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AlbumScreen(
+    repository: ArchiveRepository,
+    onBack: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val links by repository.observeLinks().collectAsStateWithLifecycle(initialValue = emptyList())
+    var query by remember { mutableStateOf("") }
+    var selectedLinkIds by remember { mutableStateOf(emptySet<Long>()) }
+
+    BackHandler { onBack() }
+
+    val albums = links.filter { it.linkType == LinkType.ALBUM }
+    val shown = albums.filter { album ->
+        val q = query.trim()
+        q.isBlank() || album.title?.contains(q, ignoreCase = true) == true ||
+            album.normalizedUrl.contains(q, ignoreCase = true)
+    }
+    val selectionMode = selectedLinkIds.isNotEmpty()
+
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("专辑", fontWeight = FontWeight.SemiBold) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回首页")
+                    }
+                },
+                actions = {
+                    if (albums.isNotEmpty()) {
+                        IconButton(onClick = {
+                            scope.launch {
+                                val path = repository.exportAlbums(albums)
+                                snackbarHostState.showSnackbar("已导出全部 ${albums.size} 个专辑 → $path")
+                            }
+                        }) {
+                            Icon(Icons.Filled.FileDownload, contentDescription = "导出全部为JSON")
+                        }
+                    }
+                },
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surface,
+                ),
+            )
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        bottomBar = {
+            if (selectionMode) {
+                SelectionBar(
+                    selectedCount = selectedLinkIds.size,
+                    onExport = {
+                        scope.launch {
+                            val sel = albums.filter { it.id in selectedLinkIds }
+                            val path = repository.exportAlbums(sel)
+                            snackbarHostState.showSnackbar("已导出 ${sel.size} 个专辑 → $path")
+                            selectedLinkIds = emptySet()
+                        }
+                    },
+                    onDelete = {
+                        scope.launch {
+                            val n = repository.deleteArticlesForLinks(selectedLinkIds)
+                            snackbarHostState.showSnackbar("已删除 $n 个专辑")
+                            selectedLinkIds = emptySet()
+                        }
+                    },
+                    onCancel = { selectedLinkIds = emptySet() },
+                )
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.background,
+    ) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            SearchField(query = query, onQueryChange = { query = it })
+            Text(
+                text = "共 ${albums.size} 个专辑 · 点按选择，可批量导出 JSON",
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (shown.isEmpty()) {
+                Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Filled.Collections,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.size(72.dp),
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            text = if (query.isNotBlank()) {
+                                "没有匹配“$query”的专辑"
+                            } else {
+                                "还没有专辑。打开带合集的文章后，专辑会自动收集到这里。"
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    items(shown, key = { it.id }) { album ->
+                        ArchiveListRow(
+                            item = ArchiveListItem(album, null, null),
+                            selected = album.id in selectedLinkIds,
+                            selectionMode = selectionMode,
+                            onOpen = {},
+                            onToggleSelect = {
+                                selectedLinkIds = if (album.id in selectedLinkIds) {
+                                    selectedLinkIds - album.id
+                                } else {
+                                    selectedLinkIds + album.id
+                                }
+                            },
+                        )
                     }
                 }
             }
@@ -476,7 +614,6 @@ private fun ArchiveListRow(
     selectionMode: Boolean,
     onOpen: () -> Unit,
     onToggleSelect: () -> Unit,
-    onArchiveAlbum: () -> Unit,
 ) {
     val article = item.article
     val link = item.link
@@ -490,7 +627,10 @@ private fun ArchiveListRow(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(
-                onClick = { if (selectionMode) onToggleSelect() else onOpen() },
+                // 专辑只记名称+地址，不再打开网页：点专辑行只做选择（便于批量导出）。
+                onClick = {
+                    if (selectionMode || link.linkType == LinkType.ALBUM) onToggleSelect() else onOpen()
+                },
                 onLongClick = onToggleSelect,
             ),
     ) {
@@ -502,7 +642,7 @@ private fun ArchiveListRow(
             LeadingAvatar(type = link.linkType, selected = selected)
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = article?.title ?: link.displayName(),
+                    text = article?.title ?: link.title ?: link.displayName(),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.titleMedium,
@@ -526,17 +666,6 @@ private fun ArchiveListRow(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                }
-                if (link.linkType == LinkType.ALBUM && article != null) {
-                    TextButton(
-                        onClick = onArchiveAlbum,
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                        modifier = Modifier.padding(top = 4.dp),
-                    ) {
-                        Icon(Icons.Filled.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("存档专辑")
-                    }
                 }
             }
         }
@@ -598,6 +727,11 @@ private fun StatusBadge(state: ItemState) {
             MaterialTheme.colorScheme.onSurfaceVariant,
             Icons.Filled.CloudDownload, "未下载",
         )
+        ItemState.Album -> BadgeStyle(
+            MaterialTheme.colorScheme.primaryContainer,
+            MaterialTheme.colorScheme.onPrimaryContainer,
+            Icons.Filled.Collections, "专辑",
+        )
     }
     AssistChip(
         onClick = {},
@@ -652,22 +786,25 @@ private fun EmptyState(query: String, filter: DrawerFilter) {
 private fun ArchiveListItem.state(): ItemState = when {
     link.status == LinkStatus.FAILED || task?.status == TaskStatus.FAILED -> ItemState.Failed
     link.status == LinkStatus.NEEDS_MANUAL_OPEN || task?.status == TaskStatus.NEEDS_MANUAL_OPEN -> ItemState.NeedsManual
+    link.linkType == LinkType.ALBUM -> ItemState.Album
     article != null -> ItemState.Saved
     task?.status == TaskStatus.RUNNING || task?.status == TaskStatus.PENDING || link.status == LinkStatus.QUEUED -> ItemState.Queued
     else -> ItemState.NotSaved
 }
 
-private fun ArchiveListItem.matchesFilter(filter: DrawerFilter): Boolean =
-    when (filter) {
+private fun ArchiveListItem.matchesFilter(filter: DrawerFilter): Boolean {
+    // 专辑是独立页面，首页所有筛选都不显示专辑。
+    if (link.linkType == LinkType.ALBUM) return false
+    return when (filter) {
         DrawerFilter.All -> true
         DrawerFilter.Saved -> article != null
         DrawerFilter.NotSaved -> article == null
-        DrawerFilter.Albums -> link.linkType == LinkType.ALBUM
         DrawerFilter.Failed -> link.status == LinkStatus.FAILED ||
             link.status == LinkStatus.NEEDS_MANUAL_OPEN ||
             task?.status == TaskStatus.FAILED ||
             task?.status == TaskStatus.NEEDS_MANUAL_OPEN
     }
+}
 
 private fun ArchiveListItem.matchesQuery(query: String): Boolean {
     val value = query.trim()
@@ -697,7 +834,6 @@ private fun DrawerFilter.icon(): ImageVector =
         DrawerFilter.All -> Icons.Filled.Inbox
         DrawerFilter.Saved -> Icons.Filled.CheckCircle
         DrawerFilter.NotSaved -> Icons.Filled.CloudDownload
-        DrawerFilter.Albums -> Icons.Filled.Collections
         DrawerFilter.Failed -> Icons.Filled.ErrorOutline
     }
 

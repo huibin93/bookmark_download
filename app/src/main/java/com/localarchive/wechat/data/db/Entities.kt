@@ -30,6 +30,8 @@ data class LinkRecordEntity(
     @ColumnInfo(name = "first_seen_at") val firstSeenAt: Long,
     @ColumnInfo(name = "last_seen_at") val lastSeenAt: Long,
     val status: LinkStatus = LinkStatus.CAPTURED,
+    // 专辑/文章的显示名称。专辑只记“名称 + 地址”，名称从文章里的 textvalue 提取。
+    val title: String? = null,
 )
 
 @Entity(
