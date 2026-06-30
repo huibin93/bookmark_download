@@ -30,6 +30,7 @@ import com.localarchive.wechat.data.repository.CaptureLinkResult
 import com.localarchive.wechat.ui.ArchiveBrowser
 import com.localarchive.wechat.ui.ArchiveTheme
 import com.localarchive.wechat.ui.StoredArticleInput
+import com.localarchive.wechat.ui.rememberArchiveFolder
 
 class BrowserActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -46,6 +47,12 @@ class BrowserActivity : ComponentActivity() {
 
         setContent {
             ArchiveTheme {
+                // 分享/打开文章是常见首次入口：没授权保存文件夹时先弹一次系统选择器，
+                // 保证自动保存有地方落（仅在线抓取时需要，离线查看不需要）。
+                val folder = rememberArchiveFolder(repository)
+                LaunchedEffect(folder.hasFolder, archiveDir) {
+                    if (!folder.hasFolder && archiveDir == null) folder.pick()
+                }
                 var linkId by remember { mutableLongStateOf(suppliedLinkId) }
                 var url by remember { mutableStateOf(initialUrl) }
                 var unsupported by remember { mutableStateOf(false) }

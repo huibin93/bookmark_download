@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Menu
@@ -113,6 +114,8 @@ private data class ArchiveListItem(
 @Composable
 fun ArchiveApp(
     repository: ArchiveRepository,
+    hasArchiveFolder: Boolean,
+    onPickFolder: () -> Unit,
     onOpenRemoteLink: (LinkRecordEntity) -> Unit,
     onOpenStoredArticle: (ArticleEntity) -> Unit,
 ) {
@@ -182,17 +185,10 @@ fun ArchiveApp(
                 if (selectionMode) {
                     SelectionBar(
                         selectedCount = selectedLinkIds.size,
-                        onExport = {
-                            scope.launch {
-                                val count = repository.exportArticlesForLinks(selectedLinkIds)
-                                snackbarHostState.showSnackbar("已导出 $count 篇到 Downloads/WechatArchive")
-                                selectedLinkIds = emptySet()
-                            }
-                        },
                         onDelete = {
                             scope.launch {
                                 val count = repository.deleteArticlesForLinks(selectedLinkIds)
-                                snackbarHostState.showSnackbar("已删除 $count 项")
+                                snackbarHostState.showSnackbar("已删除 $count 项（含 Downloads 文件）")
                                 selectedLinkIds = emptySet()
                             }
                         },
@@ -207,6 +203,9 @@ fun ArchiveApp(
                     .fillMaxSize()
                     .padding(padding),
             ) {
+                if (!hasArchiveFolder) {
+                    FolderGrantBanner(onPickFolder = onPickFolder)
+                }
                 ComposerCard(
                     input = input,
                     onInputChange = { input = it },
@@ -403,6 +402,38 @@ private fun AlbumScreen(
 }
 
 @Composable
+private fun FolderGrantBanner(onPickFolder: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Icon(Icons.Filled.Folder, contentDescription = null)
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "请选择保存文件夹",
+                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    "首次使用需授权一个文件夹（建议在 Download 下新建 WechatArchive），全部文章只存这一份。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Button(onClick = onPickFolder) { Text("选择") }
+        }
+    }
+}
+
+@Composable
 private fun ComposerCard(
     input: String,
     onInputChange: (String) -> Unit,
@@ -571,9 +602,9 @@ private fun ArchiveDrawer(
 @Composable
 private fun SelectionBar(
     selectedCount: Int,
-    onExport: () -> Unit,
     onDelete: () -> Unit,
     onCancel: () -> Unit,
+    onExport: (() -> Unit)? = null,
 ) {
     Surface(
         tonalElevation = 3.dp,
@@ -593,15 +624,17 @@ private fun SelectionBar(
                 fontWeight = FontWeight.SemiBold,
             )
             TextButton(onClick = onCancel) { Text("取消") }
-            OutlinedButton(onClick = onDelete) {
+            if (onExport != null) {
+                OutlinedButton(onClick = onExport) {
+                    Icon(Icons.Filled.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("导出")
+                }
+            }
+            Button(onClick = onDelete) {
                 Icon(Icons.Filled.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("删除")
-            }
-            Button(onClick = onExport) {
-                Icon(Icons.Filled.FileDownload, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("导出")
             }
         }
     }

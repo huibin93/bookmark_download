@@ -8,6 +8,7 @@ import androidx.activity.enableEdgeToEdge
 import com.localarchive.wechat.data.db.ArticleEntity
 import com.localarchive.wechat.ui.ArchiveApp
 import com.localarchive.wechat.ui.ArchiveTheme
+import com.localarchive.wechat.ui.rememberArchiveFolder
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -16,8 +17,11 @@ class MainActivity : ComponentActivity() {
         val repository = archiveApplication.archiveRepository
         setContent {
             ArchiveTheme {
+                val folder = rememberArchiveFolder(repository)
                 ArchiveApp(
                     repository = repository,
+                    hasArchiveFolder = folder.hasFolder,
+                    onPickFolder = folder.pick,
                     onOpenRemoteLink = { link ->
                         startActivity(BrowserActivity.createIntent(this, link.normalizedUrl, link.id))
                     },

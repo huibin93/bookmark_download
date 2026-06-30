@@ -100,4 +100,18 @@ interface ArchiveDao {
 
     @Query("DELETE FROM download_tasks WHERE link_id IN (:linkIds)")
     suspend fun deleteTasksByLinkIds(linkIds: List<Long>)
+
+    // --- one-time clean-slate (rebuild v2): wipe saved content, keep captured links ---
+
+    @Query("DELETE FROM articles")
+    suspend fun deleteAllArticles()
+
+    @Query("DELETE FROM download_tasks")
+    suspend fun deleteAllDownloadTasks()
+
+    @Query("DELETE FROM discovered_links")
+    suspend fun deleteAllDiscoveredLinks()
+
+    @Query("UPDATE link_records SET status = 'CAPTURED' WHERE status = 'SAVED'")
+    suspend fun resetSavedLinksToCaptured()
 }
